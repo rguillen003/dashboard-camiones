@@ -10,6 +10,8 @@
 <link rel="apple-touch-icon" href="Logo.png">
 <title>Dashboard — Lonccos y Ccalas S.A.C.</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -133,6 +135,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 .mtv{font-size:16px;font-weight:700;}
 .mtl{font-size:9px;color:var(--txt2);text-transform:uppercase;margin-top:2px;}
 .footer{text-align:center;font-size:10px;color:var(--txt2);margin-top:6px;}
+.tend-card{background:var(--bg3);border-radius:10px;padding:12px 16px;flex:1;min-width:160px;}
+.tend-val{font-size:22px;font-weight:700;line-height:1;}
+.tend-lbl{font-size:10px;color:var(--txt2);margin-top:3px;text-transform:uppercase;letter-spacing:.04em;}
+.tend-arrow{font-size:12px;font-weight:600;margin-top:4px;}
 .PC0{color:#1D9E75;}.PC1{color:#378ADD;}.PC2{color:#7F77DD;}.PC3{color:#F0997B;}.PC4{color:#FAC775;}.PC5{color:#9FE1CB;}.PC6{color:#AFA9EC;}.PC7{color:#85B7EB;}
 .PB0{background:#1D9E75;}.PB1{background:#378ADD;}.PB2{background:#7F77DD;}.PB3{background:#F0997B;}.PB4{background:#FAC775;}.PB5{background:#9FE1CB;}.PB6{background:#AFA9EC;}.PB7{background:#85B7EB;}
 </style>
@@ -168,7 +174,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <label>Hasta:</label><input type="date" id="f-hasta">
   </div>
   <button class="btn-f btn-g" onclick="renderAll()">↻ Actualizar</button>
-  <button class="btn-f btn-gr" onclick="window.print()">⬇ PDF</button>
+  <button class="btn-f btn-gr" onclick="exportarPNG()">📸 Imagen</button>
+  <button class="btn-f btn-gr" onclick="exportarPDF()">📄 Reporte PDF</button>
+  <button class="btn-f btn-gr" onclick="mostrarComp()" id="btn-comp">📊 Comparativa</button>
   <span id="last-upd" style="font-size:10px;color:var(--txt2);"></span>
 </div>
 
@@ -224,6 +232,56 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 </div>
 
 <div class="footer">Actualización automática cada 60 s · Datos en tiempo real vía Firebase · Lonccos y Ccalas S.A.C.</div>
+
+<!-- MODAL COMPARATIVA -->
+<div class="modal-ov" id="modal-comp">
+  <div class="modal" style="max-width:900px;width:95%;">
+    <div class="mhdr">
+      <div class="mtit">📊 Comparativa histórica</div>
+      <button class="mcls" onclick="cerrarComp()">✕</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:flex-end;background:var(--bg3);padding:12px;border-radius:10px;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.05em;">Agrupar por</label>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-f btn-g" onclick="renderComp('diario')" id="comp-dia">Días</button>
+          <button class="btn-f btn-gr" onclick="renderComp('semanal')" id="comp-sem">Semanas</button>
+          <button class="btn-f btn-gr" onclick="renderComp('mensual')" id="comp-mes">Meses</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.05em;">Desde</label>
+        <input type="date" id="comp-desde" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg2);color:var(--txt);" onchange="renderComp(compMode)">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:10px;color:var(--txt2);text-transform:uppercase;letter-spacing:.05em;">Hasta</label>
+        <input type="date" id="comp-hasta" style="font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg2);color:var(--txt);" onchange="renderComp(compMode)">
+      </div>
+      <button class="btn-f btn-gr" onclick="resetCompFechas()" style="align-self:flex-end;">Todo el historial</button>
+    </div>
+    <div id="comp-tendencia" style="margin-bottom:14px;display:flex;gap:10px;flex-wrap:wrap;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;">
+        <div style="font-size:10px;color:var(--txt2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Camiones por período</div>
+        <div style="height:200px;"><canvas id="ch-comp-vol"></canvas></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;">
+        <div style="font-size:10px;color:var(--txt2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Tiempo promedio de atención (min)</div>
+        <div style="height:200px;"><canvas id="ch-comp-avg"></canvas></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;">
+        <div style="font-size:10px;color:var(--txt2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Cumplimiento ventana horaria (%)</div>
+        <div style="height:180px;"><canvas id="ch-comp-vent"></canvas></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:10px;padding:14px;">
+        <div style="font-size:10px;color:var(--txt2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Tiempo muerto total (min)</div>
+        <div style="height:180px;"><canvas id="ch-comp-tm"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL -->
 <div class="modal-ov" id="modal-ov">
@@ -658,7 +716,336 @@ function renderAll(){
   document.getElementById('last-upd').textContent='Actualizado: '+new Date().toLocaleTimeString('es-PE');
 }
 
+// ── EXPORTAR PNG ──────────────────────────────────────────────────────────────
+function exportarPNG(){
+  const el=document.body;
+  const btn=document.getElementById('btn-comp');
+  if(btn)btn.style.display='none';
+  html2canvas(el,{
+    backgroundColor:'#0f1117',
+    scale:1.5,
+    useCORS:true,
+    logging:false,
+    windowWidth:document.documentElement.scrollWidth,
+    windowHeight:document.documentElement.scrollHeight
+  }).then(canvas=>{
+    const a=document.createElement('a');
+    a.download='dashboard_'+today()+'.png';
+    a.href=canvas.toDataURL('image/png');
+    a.click();
+    if(btn)btn.style.display='';
+  }).catch(()=>{if(btn)btn.style.display='';alert('Error al generar imagen.');});
+}
+
+// ── EXPORTAR PDF REPORTE ───────────────────────────────────────────────────────
+async function exportarPDF(){
+  try{
+    const jsPDFLib=window.jspdf;
+    if(!jsPDFLib){alert('Librería PDF no cargada. Recarga la página e intenta de nuevo.');return;}
+    const {jsPDF}=jsPDFLib;
+    const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+    const W=297,M=12,cw=W-M*2;
+    const data=filtrar().sort((a,b)=>(a.hRegistro||'').localeCompare(b.hRegistro||''));
+    const total=data.length;
+    const withT=data.filter(r=>mdiff(r.hRegistro,r.hSalida)!==null);
+    const withE=data.filter(r=>mdiff(r.hRegistro,r.hApertura)!==null);
+    const avgT=avg(withT.map(r=>mdiff(r.hRegistro,r.hSalida)));
+    const avgE=avg(withE.map(r=>mdiff(r.hRegistro,r.hApertura)));
+    const dentroV=data.filter(r=>!r.fueraVentana).length;
+    const fV2=data.filter(r=>r.fueraVentana).length;
+    let tmT=0;
+    const ds=[...data].sort((a,b)=>(a.hRegistro||'').localeCompare(b.hRegistro||''));
+    for(let i=1;i<ds.length;i++){const tm=mdiff(ds[i-1].hSalida||ds[i-1].hCierre,ds[i].hRegistro);if(tm&&tm>0)tmT+=tm;}
+
+    // ── Fondo y encabezado ────────────────────────────────────────────────
+    doc.setFillColor(15,17,23);
+    doc.rect(0,0,W,210,'F');
+    doc.setFillColor(26,29,39);
+    doc.rect(0,0,W,20,'F');
+
+    doc.setTextColor(201,162,39);
+    doc.setFontSize(13);
+    doc.setFont('helvetica','bold');
+    doc.text('LONCCOS Y CCALAS S.A.C.',M,9);
+
+    doc.setTextColor(154,160,180);
+    doc.setFontSize(8);
+    doc.setFont('helvetica','normal');
+    doc.text('Control de llegadas de camiones',M,15);
+
+    const periodo={'dia':'Hoy — '+fmtD(today()),'semana':'Esta semana','mes':'Este mes','todo':'Todo el historial','rango':'Rango personalizado'}[document.getElementById('f-periodo').value]||'';
+    doc.setTextColor(240,240,240);
+    doc.setFontSize(10);
+    doc.setFont('helvetica','bold');
+    doc.text(periodo,W-M,9,{align:'right'});
+    doc.setTextColor(154,160,180);
+    doc.setFontSize(8);
+    doc.setFont('helvetica','normal');
+    doc.text('Generado: '+new Date().toLocaleString('es-PE'),W-M,15,{align:'right'});
+
+    // ── Métricas ──────────────────────────────────────────────────────────
+    let y=26;
+    const mets=[
+      {l:'Recepcionadas',v:String(total),r:26,g:129,b:217},
+      {l:'Dentro ventana',v:dentroV+' ('+( total?Math.round(dentroV/total*100):0)+'%)',r:29,g:158,b:117},
+      {l:'Fuera ventana',v:String(fV2),r:226,g:75,b:74},
+      {l:'Prom. atención',v:fhm(avgT),r:201,g:162,b:39},
+      {l:'Prom. espera',v:fhm(avgE),r:160,g:119,b:221},
+      {l:'T. muerto total',v:fhm(tmT),r:90,g:156,b:180},
+    ];
+    const bw=(cw-10)/6;
+    mets.forEach((m,i)=>{
+      const x=M+i*(bw+2);
+      doc.setFillColor(m.r,m.g,m.b);
+      doc.roundedRect(x,y,bw,14,2,2,'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(13);
+      doc.setFont('helvetica','bold');
+      doc.text(m.v,x+bw/2,y+7,{align:'center'});
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(230,230,230);
+      doc.text(m.l,x+bw/2,y+12,{align:'center'});
+    });
+
+    // ── Cabecera tabla ────────────────────────────────────────────────────
+    y=46;
+    doc.setFillColor(46,51,80);
+    doc.rect(M,y,cw,6,'F');
+    doc.setTextColor(154,160,180);
+    doc.setFontSize(7);
+    doc.setFont('helvetica','bold');
+    const cols=[
+      {t:'#',x:M+2,w:6},
+      {t:'Fecha',x:M+8,w:16},
+      {t:'Conductor',x:M+24,w:36},
+      {t:'Tracto',x:M+60,w:16},
+      {t:'Planta',x:M+76,w:20},
+      {t:'Registro',x:M+96,w:14},
+      {t:'Apertura',x:M+110,w:14},
+      {t:'Cierre',x:M+124,w:14},
+      {t:'Salida',x:M+138,w:14},
+      {t:'T.Espera',x:M+152,w:16},
+      {t:'T.Total',x:M+168,w:16},
+      {t:'Estado',x:M+184,w:22},
+      {t:'FV',x:M+206,w:8},
+    ];
+    cols.forEach(c=>doc.text(c.t,c.x,y+4));
+    y+=6;
+
+    // ── Filas de datos ────────────────────────────────────────────────────
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(6.5);
+    data.forEach((r,i)=>{
+      if(y>195){
+        doc.addPage();
+        doc.setFillColor(15,17,23);
+        doc.rect(0,0,W,210,'F');
+        y=14;
+      }
+      // Fondo alternado
+      if(r.fueraVentana){
+        doc.setFillColor(60,20,20);
+      } else {
+        doc.setFillColor(i%2===0?26:22,i%2===0?29:26,i%2===0?39:35);
+      }
+      doc.rect(M,y,cw,5.5,'F');
+
+      const tE=mdiff(r.hRegistro,r.hApertura);
+      const tT2=mdiff(r.hRegistro,r.hSalida);
+
+      doc.setTextColor(220,220,220);
+      doc.text(String(i+1),cols[0].x,y+4);
+      doc.text(fmtD(r.fecha||''),cols[1].x,y+4);
+      doc.text((r.conductor||'').substring(0,22),cols[2].x,y+4);
+      doc.text((r.tracto||'').substring(0,10),cols[3].x,y+4);
+      doc.text((r.planta||'').substring(0,12),cols[4].x,y+4);
+      doc.text(r.hRegistro||'',cols[5].x,y+4);
+      doc.text(r.hApertura||'',cols[6].x,y+4);
+      doc.text(r.hCierre||'',cols[7].x,y+4);
+      doc.text(r.hSalida||'',cols[8].x,y+4);
+      doc.text(fhm(tE),cols[9].x,y+4);
+      doc.text(fhm(tT2),cols[10].x,y+4);
+
+      // Estado con color
+      const est=r.estado==='Finalizado'?[29,158,117]:r.estado==='En operación'?[55,138,221]:[186,117,23];
+      doc.setTextColor(est[0],est[1],est[2]);
+      doc.setFont('helvetica','bold');
+      doc.text((r.estado||'').replace('En operación','En op.'),cols[11].x,y+4);
+      doc.setFont('helvetica','normal');
+
+      if(r.fueraVentana){doc.setTextColor(226,75,74);}else{doc.setTextColor(29,158,117);}
+      doc.text(r.fueraVentana?'SÍ':'NO',cols[12].x,y+4);
+
+      y+=5.5;
+    });
+
+    // ── Footer en cada página ─────────────────────────────────────────────
+    const pages=doc.internal.getNumberOfPages();
+    for(let p=1;p<=pages;p++){
+      doc.setPage(p);
+      doc.setFillColor(26,29,39);
+      doc.rect(0,203,W,7,'F');
+      doc.setTextColor(100,100,120);
+      doc.setFontSize(7);
+      doc.setFont('helvetica','normal');
+      doc.text('Lonccos y Ccalas S.A.C. · Sistema de control de camiones · Pág. '+p+'/'+pages,W/2,207,{align:'center'});
+    }
+
+    doc.save('reporte_camiones_'+today()+'.pdf');
+  } catch(err){
+    console.error('PDF error:',err);
+    alert('Error al generar PDF: '+err.message);
+  }
+}
+
+// ── COMPARATIVA // ── COMPARATIVA ───────────────────────────────────────────────────────────────
+let compMode='semanal';
+function mostrarComp(){
+  document.getElementById('modal-comp').classList.add('on');
+  // Default: last 30 days
+  const hoy=today();
+  const hace30=new Date(new Date(hoy+'T12:00:00').getTime()-30*86400000).toISOString().slice(0,10);
+  const desdeEl=document.getElementById('comp-desde');
+  const hastaEl=document.getElementById('comp-hasta');
+  if(desdeEl&&!desdeEl.value)desdeEl.value=hace30;
+  if(hastaEl&&!hastaEl.value)hastaEl.value=hoy;
+  renderComp('diario');
+}
+function cerrarComp(){document.getElementById('modal-comp').classList.remove('on');}
+
+
+function resetCompFechas(){
+  document.getElementById('comp-desde').value='';
+  document.getElementById('comp-hasta').value='';
+  renderComp(compMode);
+}
+
+function renderComp(mode){
+  compMode=mode;
+  document.getElementById('comp-dia').className='btn-f '+(mode==='diario'?'btn-g':'btn-gr');
+  document.getElementById('comp-sem').className='btn-f '+(mode==='semanal'?'btn-g':'btn-gr');
+  document.getElementById('comp-mes').className='btn-f '+(mode==='mensual'?'btn-g':'btn-gr');
+
+  // Filtrar por rango de fechas si se seleccionó
+  const cDesde=document.getElementById('comp-desde').value;
+  const cHasta=document.getElementById('comp-hasta').value;
+  const dataComp=DB_ALL.filter(r=>{
+    if(!r.fecha)return false;
+    if(cDesde&&r.fecha<cDesde)return false;
+    if(cHasta&&r.fecha>cHasta)return false;
+    return true;
+  });
+
+  // Agrupar datos
+  const grupos={};
+  dataComp.forEach(r=>{
+    if(!r.fecha)return;
+    let key;
+    if(mode==='diario'){
+      const[y,m,d]=r.fecha.split('-');
+      key=d+'/'+m+'/'+y;
+    } else if(mode==='semanal'){
+      const d=new Date(r.fecha+'T12:00:00');
+      const day=d.getDay()||7;
+      const lu=new Date(d);lu.setDate(d.getDate()-day+1);
+      key='Sem '+lu.toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit'});
+    } else {
+      const[y,m]=r.fecha.split('-');
+      const meses=['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+      key=meses[+m]+' '+y;
+    }
+    if(!grupos[key])grupos[key]={total:0,tiempos:[],esperas:[],fueraV:0,tm:0};
+    grupos[key].total++;
+    const tT=mdiff(r.hRegistro,r.hSalida);
+    const tE=mdiff(r.hRegistro,r.hApertura);
+    if(tT!==null)grupos[key].tiempos.push(tT);
+    if(tE!==null)grupos[key].esperas.push(tE);
+    if(r.fueraVentana)grupos[key].fueraV++;
+  });
+
+  // Calcular tiempo muerto por grupo
+  const byGrupo={};
+  dataComp.forEach(r=>{
+    if(!r.fecha)return;
+    let key;
+    if(mode==='diario'){
+      const[y,m,d]=r.fecha.split('-');key=d+'/'+m+'/'+y;
+    } else if(mode==='semanal'){
+      const d=new Date(r.fecha+'T12:00:00'),day=d.getDay()||7,lu=new Date(d);
+      lu.setDate(d.getDate()-day+1);
+      key='Sem '+lu.toLocaleDateString('es-PE',{day:'2-digit',month:'2-digit'});
+    } else {
+      const[y,m]=r.fecha.split('-'),meses=['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+      key=meses[+m]+' '+y;
+    }
+    if(!byGrupo[key])byGrupo[key]=[];
+    byGrupo[key].push(r);
+  });
+  Object.entries(byGrupo).forEach(([k,regs])=>{
+    const sorted=regs.sort((a,b)=>(a.hRegistro||'').localeCompare(b.hRegistro||''));
+    let tm=0;
+    for(let i=1;i<sorted.length;i++){const t=mdiff(sorted[i-1].hSalida||sorted[i-1].hCierre,sorted[i].hRegistro);if(t>0)tm+=t;}
+    if(grupos[k])grupos[k].tm=tm;
+  });
+
+  const labels=Object.keys(grupos);
+  const vols=labels.map(k=>grupos[k].total);
+  const avgs=labels.map(k=>grupos[k].tiempos.length?Math.round(grupos[k].tiempos.reduce((a,b)=>a+b,0)/grupos[k].tiempos.length):0);
+  const vents=labels.map(k=>grupos[k].total?Math.round((1-grupos[k].fueraV/grupos[k].total)*100):0);
+  const tms=labels.map(k=>grupos[k].tm);
+
+  // Tendencia (últimos 2 vs anteriores 2)
+  const tendEl=document.getElementById('comp-tendencia');
+  if(labels.length>=2){
+    const last=labels.slice(-2),prev=labels.slice(-4,-2);
+    const avgLast=avg(last.map(k=>grupos[k].tiempos.length?Math.round(grupos[k].tiempos.reduce((a,b)=>a+b,0)/grupos[k].tiempos.length):0).filter(x=>x>0));
+    const avgPrev=prev.length?avg(prev.map(k=>grupos[k].tiempos.length?Math.round(grupos[k].tiempos.reduce((a,b)=>a+b,0)/grupos[k].tiempos.length):0).filter(x=>x>0)):null;
+    const volLast=Math.round(last.reduce((a,k)=>a+grupos[k].total,0)/last.length);
+    const volPrev=prev.length?Math.round(prev.reduce((a,k)=>a+grupos[k].total,0)/prev.length):null;
+    const diffT=avgPrev!==null?avgLast-avgPrev:null;
+    const diffV=volPrev!==null?volLast-volPrev:null;
+    tendEl.innerHTML=`
+      <div class="tend-card"><div class="tend-lbl">Tendencia tiempo atención</div>
+        <div class="tend-val" style="color:${diffT===null?'#888':diffT<0?'#4DD9A0':'#FF6B6B'}">${avgLast?fhm(avgLast):'—'}</div>
+        <div class="tend-arrow" style="color:${diffT===null?'#888':diffT<0?'#4DD9A0':'#FF6B6B'}">${diffT===null?'Sin datos anteriores':diffT<0?'▼ Mejorando '+fhm(Math.abs(diffT)):diffT===0?'= Sin cambio':'▲ Empeorando '+fhm(diffT)}</div>
+      </div>
+      <div class="tend-card"><div class="tend-lbl">Tendencia volumen</div>
+        <div class="tend-val" style="color:${diffV===null?'#888':diffV>0?'#4DD9A0':'#FF6B6B'}">${volLast} cam.</div>
+        <div class="tend-arrow" style="color:${diffV===null?'#888':diffV>0?'#4DD9A0':diffV<0?'#FF6B6B':'#888'}">${diffV===null?'Sin datos anteriores':diffV>0?'▲ +'+diffV+' vs período anterior':diffV<0?'▼ '+diffV+' vs período anterior':'= Sin cambio'}</div>
+      </div>
+      <div class="tend-card"><div class="tend-lbl">Mejor período</div>
+        <div class="tend-val" style="color:#C9A227">${avgs.length?labels[avgs.indexOf(Math.min(...avgs.filter(x=>x>0)))]||'—':'—'}</div>
+        <div class="tend-arrow" style="color:#9aa0b4">menor tiempo promedio</div>
+      </div>
+      <div class="tend-card"><div class="tend-lbl">Período más activo</div>
+        <div class="tend-val" style="color:#378ADD">${vols.length?labels[vols.indexOf(Math.max(...vols))]||'—':'—'}</div>
+        <div class="tend-arrow" style="color:#9aa0b4">${vols.length?Math.max(...vols)+' camiones':'—'}</div>
+      </div>`;
+  } else {
+    tendEl.innerHTML='<div style="color:var(--txt2);font-size:12px;">Se necesitan al menos 2 períodos de datos para mostrar tendencias.</div>';
+  }
+
+  const baseOpts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:9},color:'#777'},grid:{display:false}},y:{ticks:{font:{size:9},color:'#777'},beginAtZero:true,grid:{color:'rgba(255,255,255,0.05)'}}}};
+
+  kC('ch-comp-vol');
+  mC('ch-comp-vol',{type:'bar',data:{labels,datasets:[{data:vols,backgroundColor:PC[0]+'bb',borderWidth:0,borderRadius:4}]},options:{...baseOpts,plugins:{...baseOpts.plugins,tooltip:{callbacks:{label:(ctx)=>ctx.raw+' camiones'}}}}});
+
+  kC('ch-comp-avg');
+  mC('ch-comp-avg',{type:'line',data:{labels,datasets:[{data:avgs,borderColor:'#C9A227',backgroundColor:'rgba(201,162,39,0.1)',borderWidth:2.5,pointRadius:5,pointBackgroundColor:'#C9A227',tension:0.3,fill:true}]},options:{...baseOpts,plugins:{...baseOpts.plugins,tooltip:{callbacks:{label:(ctx)=>fhm(ctx.raw)}}},scales:{...baseOpts.scales,y:{...baseOpts.scales.y,ticks:{...baseOpts.scales.y.ticks,callback:v=>fhm(v)}}}}});
+
+  kC('ch-comp-vent');
+  mC('ch-comp-vent',{type:'bar',data:{labels,datasets:[{data:vents,backgroundColor:vents.map(v=>v>=80?'rgba(29,158,117,0.75)':v>=60?'rgba(186,117,23,0.75)':'rgba(226,75,74,0.75)'),borderWidth:0,borderRadius:4}]},options:{...baseOpts,plugins:{...baseOpts.plugins,tooltip:{callbacks:{label:(ctx)=>ctx.raw+'%'}}}}});
+
+  kC('ch-comp-tm');
+  mC('ch-comp-tm',{type:'bar',data:{labels,datasets:[{data:tms,backgroundColor:'rgba(91,156,246,0.65)',borderWidth:0,borderRadius:4}]},options:{...baseOpts,plugins:{...baseOpts.plugins,tooltip:{callbacks:{label:(ctx)=>fhm(ctx.raw)}}},scales:{...baseOpts.scales,y:{...baseOpts.scales.y,ticks:{...baseOpts.scales.y.ticks,callback:v=>fhm(v)}}}}});
+}
+// end renderComp
+
 function initDash(){
+  // Modal comp click outside to close
+  const mo=document.getElementById('modal-comp');
+  if(mo)mo.addEventListener('click',function(e){if(e.target===this)cerrarComp();});
   setInterval(()=>{document.getElementById('reloj').textContent=new Date().toLocaleTimeString('es-PE');},1000);
   const t=today();
   try{document.getElementById('hdr-fecha').textContent=new Date(t+'T12:00:00').toLocaleDateString('es-PE',{weekday:'long',year:'numeric',month:'long',day:'numeric'});}catch(e){}
