@@ -33,6 +33,16 @@ window.dispatchEvent(new Event('fb-ready'));
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{--g:#1D9E75;--re:#E24B4A;--am:#BA7517;--bg:#0f1117;--bg2:#1a1d27;--bg3:#22263a;--txt:#f0f0f0;--txt2:#9aa0b4;--border:#2e3350;--gold:#C9A227;}
+body.light{--bg:#f0f2f5;--bg2:#ffffff;--bg3:#e8eaed;--txt:#1a1a1a;--txt2:#555555;--border:#d0d3d9;--gold:#8a6800;}
+body.light .reloj{color:#1a1a1a;}
+body.light .hdr{box-shadow:0 1px 4px rgba(0,0,0,.08);}
+body.light .ap-r{background:rgba(226,75,74,.1);color:#b02020;}
+body.light .ap-a{background:rgba(186,117,23,.1);color:#7a4a00;}
+body.light .ap-g{background:rgba(29,158,117,.1);color:#0d6e4f;}
+body.light .mc{box-shadow:0 1px 3px rgba(0,0,0,.06);}
+body.light .card{box-shadow:0 1px 3px rgba(0,0,0,.06);}
+body.light .sc{box-shadow:0 1px 3px rgba(0,0,0,.06);}
+body.light canvas{filter:none;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding:12px;}
 .hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--bg2);border-radius:12px;margin-bottom:10px;border:1px solid var(--border);flex-wrap:wrap;gap:8px;}
 .hdr-left{display:flex;align-items:center;gap:10px;}
@@ -158,6 +168,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <div class="vh-box"><div class="vh-lbl">Inicio VH</div><div class="vh-val" id="vh-ini">6:00 am</div></div>
     <div class="vh-box"><div class="vh-lbl">Fin VH</div><div class="vh-val" id="vh-fin">3:00 pm</div></div>
     <div class="reloj" id="reloj">--:--:--</div>
+    <button onclick="toggleModo()" id="modo-btn" title="Cambiar modo" style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:7px 11px;cursor:pointer;font-size:16px;color:var(--txt);transition:all .2s;">🌙</button>
   </div>
 </div>
 
@@ -191,7 +202,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
       <div style="position:relative;width:100%;height:250px;"><canvas id="ch-main"></canvas></div>
     </div>
     <div class="card">
-      <div class="ct">Tiempo muerto entre unidades consecutivas</div>
+      <div class="ct" id="tm-title">Tiempo muerto entre unidades consecutivas</div>
       <div style="position:relative;width:100%;height:185px;"><canvas id="ch-muerto"></canvas></div>
     </div>
   </div>
@@ -293,6 +304,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 
 <script>
 let DB_ALL=[],CFG={vI:'06:00',vF:'15:00'},_prog={},charts={},filtroPlanta=null,dataCurrent=[];
+function chartTickColor(){return document.body.classList.contains('light')?'#666':'#888';}
+function chartGridColor(){return document.body.classList.contains('light')?'rgba(0,0,0,0.06)':'rgba(255,255,255,0.05)';}
 const PC=['#1D9E75','#378ADD','#7F77DD','#F0997B','#FAC775','#9FE1CB','#AFA9EC','#85B7EB'];
 
 function waitFB(fn){if(window._FB_READY)fn();else window.addEventListener('fb-ready',fn,{once:true});}
@@ -373,51 +386,49 @@ function renderAll(){
   const avgE=avg(withE.map(r=>mdiff(r.hRegistro,r.hApertura)));
   const avgD=avg(withD.map(r=>mdiff(r.hApertura,r.hCierre)));
 
-  // Tiempo muerto: usa hSalida si existe, si no usa hApertura, si no usa hRegistro
-  // Así siempre hay un punto de referencia para calcular el gap
-  let tmTotal=0,tmList=[],tmMeta=[];
-  function getRefSalida(r){
-    // Mejor estimación del momento en que dejó de ocupar el espacio
-    return r.hSalida||r.hCierre||r.hApertura||null;
-  }
-  for(let i=1;i<data.length;i++){
-    const prev=data[i-1],curr=data[i];
-    const refPrev=getRefSalida(prev);
-    const refCurr=curr.hRegistro;
-    if(refPrev&&refCurr){
-      const tm=mdiff(refPrev,refCurr);
-      const val=tm!==null&&tm>=0?tm:0;
-      tmList.push(val);
-      if(val>0)tmTotal+=val;
-      const tipoRef=prev.hSalida?'Salida':prev.hCierre?'Cierre cortina':prev.hApertura?'Apertura cortina':'Registro';
-      tmMeta.push({
-        de:prev.conductor||'—',
-        a:curr.conductor||'—',
-        val,
-        refLabel:tipoRef,
-        salida:refPrev,
-        llegada:refCurr
-      });
-    } else {
-      // Sin ninguna referencia — calculamos desde hRegistro del anterior
-      if(prev.hRegistro&&curr.hRegistro){
+  // Tiempo muerto: calcula gaps entre unidades
+  // Si hay filtro de planta activo → solo calcula entre camiones de esa planta
+  // Si no hay filtro → calcula global con todas las unidades en orden de llegada
+  function getRefSalida(r){return r.hSalida||r.hCierre||r.hApertura||null;}
+
+  function calcTiempoMuerto(registros){
+    const sorted=[...registros].sort((a,b)=>(a.hRegistro||'').localeCompare(b.hRegistro||''));
+    let total=0,list=[],meta=[];
+    for(let i=1;i<sorted.length;i++){
+      const prev=sorted[i-1],curr=sorted[i];
+      const refPrev=getRefSalida(prev);
+      const refCurr=curr.hRegistro;
+      const tipoRef=prev.hSalida?'Salida':prev.hCierre?'Cierre cortina':prev.hApertura?'Apertura':null;
+      if(refPrev&&refCurr){
+        const tm=mdiff(refPrev,refCurr);
+        const val=tm!==null&&tm>=0?tm:0;
+        list.push(val);
+        if(val>0)total+=val;
+        meta.push({de:prev.conductor||'—',a:curr.conductor||'—',val,refLabel:tipoRef||'Ref.',salida:refPrev,llegada:refCurr,plantaDe:prev.planta||'—',plantaA:curr.planta||'—'});
+      } else if(prev.hRegistro&&curr.hRegistro){
         const tm=mdiff(prev.hRegistro,curr.hRegistro);
         const val=tm!==null&&tm>=0?tm:0;
-        tmList.push(val);
-        tmMeta.push({
-          de:prev.conductor||'—',
-          a:curr.conductor||'—',
-          val,
-          refLabel:'Registro (estimado)',
-          salida:prev.hRegistro,
-          llegada:curr.hRegistro
-        });
+        list.push(val);
+        meta.push({de:prev.conductor||'—',a:curr.conductor||'—',val,refLabel:'Estimado',salida:prev.hRegistro,llegada:curr.hRegistro,plantaDe:prev.planta||'—',plantaA:curr.planta||'—'});
       } else {
-        tmList.push(0);
-        tmMeta.push({de:prev.conductor||'—',a:curr.conductor||'—',val:0,refLabel:'Sin datos',salida:'—',llegada:'—'});
+        list.push(0);
+        meta.push({de:prev.conductor||'—',a:curr.conductor||'—',val:0,refLabel:'Sin datos',salida:'—',llegada:'—',plantaDe:prev.planta||'—',plantaA:curr.planta||'—'});
       }
     }
+    return {total,list,meta};
   }
+
+  // Calcular TM global (siempre con todos los datos del período)
+  const tmGlobal=calcTiempoMuerto(allData);
+
+  // Calcular TM por planta activa (si hay filtro)
+  const tmPlanta=filtroPlanta?calcTiempoMuerto(allData.filter(r=>(r.planta||'Sin planta')===filtroPlanta)):null;
+
+  // Usar el apropiado según filtro activo
+  const tmResult=tmPlanta||tmGlobal;
+  const tmTotal=tmResult.total;
+  const tmList=tmResult.list;
+  const tmMeta=tmResult.meta;
   const tmValid=tmList.filter(t=>t!==null&&t>=0);
   const tmAvg=avg(tmValid);
   const tmMax=tmValid.length?Math.max(...tmValid):null;
@@ -448,6 +459,15 @@ function renderAll(){
 
   // ── PLANTAS ───────────────────────────────────────────────────────────────────
   const byP={};allData.forEach(r=>{const p=r.planta||'Sin planta';if(!byP[p])byP[p]=0;byP[p]++;});
+
+  // Resumen por planta (siempre calculado para mostrar en métricas)
+  const tmPorPlanta={};
+  Object.keys(byP).forEach(p=>{
+    const regsP=allData.filter(r=>(r.planta||'Sin planta')===p);
+    const tmP=calcTiempoMuerto(regsP);
+    tmPorPlanta[p]={total:tmP.total,avg:avg(tmP.list.filter(t=>t>0)),count:tmP.list.filter(t=>t>0).length};
+  });
+
   const plantas=Object.entries(byP).sort((a,b)=>b[1]-a[1]);
   const pIdx={};plantas.forEach(([n],i)=>pIdx[n]=i);
   const maxP=plantas.length?plantas[0][1]:1;
@@ -547,8 +567,16 @@ function renderAll(){
   }
 
   // ── TIEMPO MUERTO PRECISO ─────────────────────────────────────────────────────
+  // Update TM chart title
+  const tmTitleEl=document.getElementById('tm-title');
+  if(tmTitleEl){
+    tmTitleEl.textContent=filtroPlanta
+      ?'Tiempo muerto entre unidades — '+filtroPlanta+' ('+tmList.filter(t=>t>0).length+' gaps)'
+      :'Tiempo muerto entre unidades consecutivas (global)';
+  }
+
   kC('ch-muerto');
-  if(!filtroPlanta&&tmList.length){
+  if(tmList.length){
     const uEsp=+(CFG.uEsp||30);
     const tmColors=tmList.map(t=>t===null?'rgba(100,100,100,0.25)':t===0?'rgba(29,158,117,0.5)':t>60?'rgba(226,75,74,0.75)':t>uEsp?'rgba(186,117,23,0.7)':'rgba(91,156,246,0.55)');
     const tmAvgLine=tmValid.length?tmList.map(()=>tmAvg):[];
@@ -569,12 +597,11 @@ function renderAll(){
               if(ctx.datasetIndex===1)return' Promedio: '+fmt(tmAvg);
               const m=tmMeta[ctx.dataIndex];
               if(!m)return' Sin datos';
-              if(m.val===0)return[' Sin tiempo muerto',' Llegada consecutiva'];
-              return[
-                ' Tiempo muerto: '+fmt(m.val),
-                ' Ref. anterior ('+m.refLabel+'): '+m.salida,
-                ' Llegada siguiente: '+m.llegada
-              ];
+              if(m.val===0)return[' Sin tiempo muerto',' Unidades consecutivas'];
+              const lines=[' Tiempo muerto: '+fmt(m.val),' Ref. ('+m.refLabel+'): '+m.salida,' Llegada siguiente: '+m.llegada];
+              if(filtroPlanta){lines.push(' Planta: '+filtroPlanta);}
+              else{lines.push(' '+m.plantaDe+' → '+m.plantaA);}
+              return lines;
             }
           }}
         },
@@ -584,6 +611,26 @@ function renderAll(){
         }
       }
     });
+  }
+
+  // ── RESUMEN TIEMPO MUERTO POR PLANTA ─────────────────────────────────────────
+  const tmPlantaEl=document.getElementById('tm-por-planta');
+  if(tmPlantaEl&&Object.keys(tmPorPlanta).length){
+    tmPlantaEl.innerHTML=Object.entries(tmPorPlanta)
+      .filter(([,v])=>v.count>0)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .map(([p,v],i)=>{
+        const col=PC[i%8];
+        const isActive=filtroPlanta===p;
+        return`<div onclick="togglePlanta('${p.replace(/'/g,"\'")}")" style="background:var(--bg3);border:1px solid ${isActive?col:'var(--border)'};border-radius:10px;padding:12px 14px;cursor:pointer;transition:all .15s;">
+          <div style="font-size:11px;font-weight:700;color:${col};margin-bottom:6px;">● ${p}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;">
+            <div><div style="font-size:16px;font-weight:700;color:var(--txt);">${fhm(v.total)}</div><div style="font-size:9px;color:var(--txt2);text-transform:uppercase;">T. muerto total</div></div>
+            <div><div style="font-size:16px;font-weight:700;color:${col};">${fhm(v.avg)}</div><div style="font-size:9px;color:var(--txt2);text-transform:uppercase;">Promedio gap</div></div>
+            <div><div style="font-size:16px;font-weight:700;color:var(--txt);">${v.count}</div><div style="font-size:9px;color:var(--txt2);text-transform:uppercase;">Gaps medidos</div></div>
+          </div>
+        </div>`;
+      }).join('');
   }
 
   // ── ACTIVOS EN TIEMPO REAL ────────────────────────────────────────────────────
@@ -1042,10 +1089,30 @@ function renderComp(mode){
 }
 // end renderComp
 
+// ── MODO CLARO / OSCURO ──────────────────────────────────────────────────────
+function toggleModo(){
+  const body=document.body;
+  const isLight=body.classList.toggle('light');
+  const btn=document.getElementById('modo-btn');
+  if(btn)btn.textContent=isLight?'🌞':'🌙';
+  try{localStorage.setItem('dashboard-modo',isLight?'light':'dark');}catch(e){}
+  // Redraw charts with new colors
+  setTimeout(renderAll,50);
+}
+
 function initDash(){
   // Modal comp click outside to close
   const mo=document.getElementById('modal-comp');
   if(mo)mo.addEventListener('click',function(e){if(e.target===this)cerrarComp();});
+  // Restore saved mode
+  try{
+    const savedMode=localStorage.getItem('dashboard-modo');
+    if(savedMode==='light'){
+      document.body.classList.add('light');
+      const btn=document.getElementById('modo-btn');
+      if(btn)btn.textContent='🌞';
+    }
+  }catch(e){}
   setInterval(()=>{document.getElementById('reloj').textContent=new Date().toLocaleTimeString('es-PE');},1000);
   const t=today();
   try{document.getElementById('hdr-fecha').textContent=new Date(t+'T12:00:00').toLocaleDateString('es-PE',{weekday:'long',year:'numeric',month:'long',day:'numeric'});}catch(e){}
